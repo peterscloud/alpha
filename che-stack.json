@@ -1,35 +1,25 @@
 {
-  "AWSTemplateFormatVersion" : "2010-09-09",
-
-    "Description" : "",
-
-    "Parameters": {
-      "IamInstanceProfileArn": {
-        "Description": "IamInstanceProfileArn",
-        "Type": "String"
-      },
-      "IamInstanceRoleArn": {
-        "Description": "IamInstanceRoleArn",
-        "Type": "String"
-      },
-      "KeyName": {
-        "Description": "KeyName",
-        "Type": "AWS::EC2::KeyPair::KeyName"
-      },
-      "VpcId": {
-        "Description": "Virtual Private Cloud used for the Security Group",
-        "Type": "AWS::EC2::VPC::Id"
-      },
-      "SubnetId": {
-        "Description": "Subnet for the Spot Instance (must be in the same VPC used by the Security Group)",
-        "Type": "AWS::EC2::Subnet::Id"
-      },
-      "InstanceType": {
-        "Description": "instance type",
-        "Type": "String",
-        "Default": "m1.small",
-        "AllowedValues": [
-          "t1.micro",
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "A stack containing an EC2 instance running Eclipse Che and openvpn. ATTENTION: if you create this stack you will incure usage charges. When done delete the stack to avoid usage charges. Backup important data before deleting the stack.",
+  "Parameters": {
+    "KeyName": {
+      "Description": "KeyName",
+      "Type": "AWS::EC2::KeyPair::KeyName"
+    },
+    "VpcId": {
+      "Description": "Virtual Private Cloud used for the Security Group",
+      "Type": "AWS::EC2::VPC::Id"
+    },
+    "SubnetId": {
+      "Description": "Subnet for the Spot Instance",
+      "Type": "AWS::EC2::Subnet::Id"
+    },
+    "InstanceType": {
+      "Description": "Instance type. Must be at least a small instance (micro and nano are too small).",
+      "Type": "String",
+      "Default": "t2.small",
+      "AllowedValues": [
+        "t1.micro",
         "t2.nano",
         "t2.micro",
         "t2.small",
@@ -83,27 +73,46 @@
         "cr1.8xlarge",
         "cc2.8xlarge",
         "cg1.4xlarge"
-          ],
-          "ConstraintDescription": "must be a valid EC2 instance type."
-      },
-      "SSHLocation": {
-        "Description": "The IP address range that can be used to SSH to the EC2 instances",
-        "Type": "String",
-        "MinLength": "9",
-        "MaxLength": "18",
-        "Default": "0.0.0.0/0",
-        "AllowedPattern": "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})",
-        "ConstraintDescription": "must be a valid IP CIDR range of the form x.x.x.x/x. To allow only your ip address use x.x.x.x/32. Lookup your ip at http://checkip.amazonaws.com/"
-      }
+      ],
+      "ConstraintDescription": "must be a valid EC2 instance type."
     },
-
-    "Resources" : {    
-      "SecurityGroup": {
-        "Type": "AWS::EC2::SecurityGroup",
-        "Properties": {
-          "GroupDescription": "Enable network access",
-          "VpcId": { "Ref": "VpcId"  },
-          "SecurityGroupIngress": [
+    "SSHLocation": {
+      "Description": "The IP address range that can be used to SSH to the EC2 instances. To allow only your ip address use x.x.x.x/32. Lookup your ip at http://checkip.amazonaws.com/",
+      "Type": "String",
+      "MinLength": "9",
+      "MaxLength": "18",
+      "Default": "0.0.0.0/0",
+      "AllowedPattern": "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})",
+      "ConstraintDescription": "must be a valid IP CIDR range of the form x.x.x.x/x. "
+    },
+    "ServerVpnEndpoint": {
+      "Description": "The server vpn endpoint. If unsure use the default value.",
+      "Type": "String",
+      "MinLength": "8",
+      "MaxLength": "16",
+      "Default": "10.1.0.1",
+      "AllowedPattern": "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})",
+      "ConstraintDescription": "must be a valid IP address of the form x.x.x.x"
+    },
+    "ClientVpnEndpoint": {
+      "Description": "The client vpn endpoint. If unsure use the default value.",
+      "Type": "String",
+      "MinLength": "8",
+      "MaxLength": "16",
+      "Default": "10.1.0.2",
+      "AllowedPattern": "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})",
+      "ConstraintDescription": "must be a valid IP address of the form x.x.x.x"
+    }
+  },
+  "Resources": {
+    "SecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "Enable network access",
+        "VpcId": {
+          "Ref": "VpcId"
+        },
+        "SecurityGroupIngress": [
           {
             "IpProtocol": "udp",
             "FromPort": "1194",
@@ -120,599 +129,699 @@
               "Ref": "SSHLocation"
             }
           }
-          ]
+        ]
+      }
+    },
+    "SecurityGroupIngress": {
+      "Type": "AWS::EC2::SecurityGroupIngress",
+      "Properties": {
+        "GroupId": {
+          "Ref": "SecurityGroup"
+        },
+        "IpProtocol": "tcp",
+        "FromPort": "0",
+        "ToPort": "65535",
+        "SourceSecurityGroupId": {
+          "Ref": "SecurityGroup"
         }
-      },
-      "SecurityGroupIngress": {
-        "Type": "AWS::EC2::SecurityGroupIngress",
-        "Properties": {
-          "GroupId": {
-            "Ref": "SecurityGroup"
-          },
-          "IpProtocol": "tcp",
-          "FromPort": "0",
-          "ToPort": "65535",
-          "SourceSecurityGroupId": {
-            "Ref": "SecurityGroup"
+      }
+    },
+    "CheInstance": {
+      "Type": "AWS::EC2::Instance",
+      "Properties": {
+        "ImageId": {
+          "Fn::FindInMap": [
+            "AWSRegionArch2AMI",
+            {
+              "Ref": "AWS::Region"
+            },
+            {
+              "Fn::FindInMap": [
+                "AWSInstanceType2Arch",
+                {
+                  "Ref": "InstanceType"
+                },
+                "Arch"
+              ]
+            }
+          ]
+        },
+        "KeyName": {
+          "Ref": "KeyName"
+        },
+        "SecurityGroupIds": [
+          {
+            "Fn::GetAtt": [
+              "SecurityGroup",
+              "GroupId"
+            ]
+          }
+        ],
+        "SubnetId": {
+          "Ref": "SubnetId"
+        },
+        "UserData": {
+          "Fn::Base64": {
+            "Fn::Join": [
+              "",
+              [
+                "#!/bin/bash\n",
+                "yum update -y aws-cfn-bootstrap\n",
+                "/opt/aws/bin/cfn-init -s ",
+                {
+                  "Ref": "AWS::StackId"
+                },
+                " -r CheInstance --configsets config0 --region ",
+                {
+                  "Ref": "AWS::Region"
+                },
+                " && /opt/aws/bin/cfn-hup"
+              ]
+            ]
           }
         }
       },
-      "CheInstance" : {
-         "Type" : "AWS::EC2::Instance",
-         "Properties" : {
-            "ImageId": {
-                "Fn::FindInMap": [
-                    "AWSRegionArch2AMI",
-                    {"Ref": "AWS::Region"},
-                    {"Fn::FindInMap": ["AWSInstanceType2Arch",{"Ref": "InstanceType"},"Arch"]}
-                ]
-              },
-            "KeyName" : {"Ref": "KeyName"},
-            "SecurityGroupId": {"Fn::GetAtt": [ "SecurityGroup", "GroupId" ]},
-            "SubnetId": {"Ref": "SubnetId"},
-            "UserData"       : { "Fn::Base64" : { "Fn::Join" : ["", [
-              "#!/bin/bash\n",
-              "yum update -y aws-cfn-bootstrap\n",
-              "/opt/aws/bin/cfn-init -s ", { "Ref" : "AWS::StackId" }, " -r CheInstance --region ",
-              { "Ref" : "AWS::Region" }, " && /opt/aws/bin/cfn-hup"
-            ]]}}
-         },
-         "Metadata": {
-          "AWS::CloudFormation::Init": {
-            "configSets": {
-              "config0": [
-                "install_cfn", "openvpn", "post_update", "pre_che", "run_che"
-              ]
-            },
-
-            "install_cfn": {
-              "files": {
-                "/etc/cfn/cfn-hup.conf": {
-                  "content": {
-                    "Fn::Join": [
-                      "",
+      "Metadata": {
+        "AWS::CloudFormation::Init": {
+          "configSets": {
+            "config0": [
+              "cloudformation",
+              "openvpn",
+              "docker",
+              "che"
+            ]
+          },
+          "cloudformation": {
+            "files": {
+              "/etc/cfn/cfn-hup.conf": {
+                "content": {
+                  "Fn::Join": [
+                    "",
                     [
                       "[main]\n",
-                    "stack=",
-                    {
-                      "Ref": "AWS::StackId"
-                    },
-                    "\n",
-                    "region=",
-                    {
-                      "Ref": "AWS::Region"
-                    },
-                    "\n",
-                    "interval=1\n",
-                    "verbose=true\n"
+                      "stack=",
+                      {
+                        "Ref": "AWS::StackId"
+                      },
+                      "\n",
+                      "region=",
+                      {
+                        "Ref": "AWS::Region"
+                      },
+                      "\n",
+                      "interval=1\n",
+                      "verbose=true\n"
                     ]
-                    ]
-                  },
-                  "mode": "000400",
-                  "owner": "root",
-                  "group": "root"
+                  ]
                 },
-                "/etc/cfn/hooks.d/cfn-auto-reloader.conf": {
-                  "content": {
-                    "Fn::Join": [
-                      "",
+                "mode": "000400",
+                "owner": "root",
+                "group": "root"
+              },
+              "/etc/cfn/hooks.d/cfn-auto-reloader.conf": {
+                "content": {
+                  "Fn::Join": [
+                    "",
                     [
                       "[cfn-auto-reloader-hook]\n",
-                    "triggers=post.update\n",
-                    "path=Resources.CheInstance.Metadata.AWS::CloudFormation::Init\n",
-                    "action=/opt/aws/bin/cfn-init -v ",
-                    "         --stack ",
-                    {
-                      "Ref": "AWS::StackName"
-                    },
-                    "         --resource CheInstance ",
-                    "         --configsets config0 ",
-                    "         --region ",
-                    {
-                      "Ref": "AWS::Region"
-                    },
-                    "\n"
+                      "triggers=post.update\n",
+                      "path=Resources.CheInstance.Metadata.AWS::CloudFormation::Init\n",
+                      "action=/opt/aws/bin/cfn-init -v ",
+                      "         --stack ",
+                      {
+                        "Ref": "AWS::StackName"
+                      },
+                      "         --resource CheInstance ",
+                      "         --configsets config0 ",
+                      "         --region ",
+                      {
+                        "Ref": "AWS::Region"
+                      },
+                      "\n"
                     ]
-                    ]
-                  },
-                  "mode": "000400",
-                  "owner": "root",
-                  "group": "root"
-                }
-              },
-              "services": {
-                "sysvinit": {
-                  "cfn-hup": {
-                    "enabled": "true",
-                    "ensureRunning": "true",
-                    "files": [
-                      "/etc/cfn/cfn-hup.conf",
-                    "/etc/cfn/hooks.d/cfn-auto-reloader.conf"
-                    ]
-                  }
-                }
+                  ]
+                },
+                "mode": "000400",
+                "owner": "root",
+                "group": "root"
               }
             },
-            "update": {
-	            "commands": {
-	              "update": {
-	                "command": "yum update -y"
-	              }
-	            }
-		  	},
-            
+            "services": {
+              "sysvinit": {
+                "cfn-hup": {
+                  "enabled": "true",
+                  "ensureRunning": "true",
+                  "files": [
+                    "/etc/cfn/cfn-hup.conf",
+                    "/etc/cfn/hooks.d/cfn-auto-reloader.conf"
+                  ]
+                }
+              }
+            }
+          },
+          "update": {
+            "commands": {
+              "update": {
+                "command": "yum update -y"
+              }
+            }
+          },
           "openvpn": {
             "packages": {
               "yum": {
                 "openvpn": []
               }
             },
-            "files" : {
+            "files": {
               "/etc/openvpn/static.conf": {
-                "content": { "Fn::Join" : ["", [
-                  "dev tun\n",
-                  "ifconfig 10.1.0.1 10.1.0.2\n",
-                  "secret static.key\n",
-                  "verb 3\n"
-                ]]}
+                "content": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "dev tun\n",
+                      "ifconfig ",
+                      {
+                        "Ref": "ServerVpnEndpoint"
+                      },
+                      " ",
+                      {
+                        "Ref": "ClientVpnEndpoint"
+                      },
+                      "\n",
+                      "secret static.key\n",
+                      "verb 3\n"
+                    ]
+                  ]
+                }
               }
             },
             "commands": {
               "genkey": {
                 "command": "openvpn --genkey --secret static.key && cp /etc/openvpn/static.key /home/ec2-user && chown ec2-user:ec2-user /home/ec2-user/static.key ",
                 "cwd": "/etc/openvpn",
-                "test" : "test ! -e /etc/openvpn/static.key"
+                "test": "test ! -e /etc/openvpn/static.key"
               }
             },
-            "services" : {
-              "sysvinit" : {
+            "services": {
+              "sysvinit": {
                 "openvpn": {
-                  "enabled" : "true",
-                  "ensureRunning" : "true",
-                  "files" : ["/etc/openvpn/static.conf"],
-                  "packages" : { "yum" : ["openvpn"] }
+                  "enabled": "true",
+                  "ensureRunning": "true",
+                  "files": [
+                    "/etc/openvpn/static.conf"
+                  ],
+                  "packages": {
+                    "yum": [
+                      "openvpn"
+                    ]
+                  }
                 }
               }
             }
           },
-	  	"post_update": {
-			    "packages": {
-			      "yum": {
-					"docker": []
-			      }
-			    },
-			    "commands": {
-                    "mkdir_che_conf": {
-                      "command": "mkdir -p /home/ec2-user/che-conf; chown ec2-user:ec2-user /home/ec2-user/che-conf",
-                      "test": "test ! -e /home/ec2-user/che-conf"
-                    }
-			    },
-			    "services": {
-			      "sysvinit": {
-			        "docker": {
-				  "enabled" : "true",
-				  "ensureRunning" : "true"
-				}
-			      }
-			    }
-			  },
-		"pre_che": {
-          "files": {
-            "/home/ec2-user/che-conf/che.properties": {
-              "source": "https://raw.githubusercontent.com/peterscloud/alpha/peterscloud/peterscloud/src/main/conf/che.properties",
-              "group": "ec2-user",
-              "owner": "ec2-user",
-              "mode": "000644"
+          "docker": {
+            "packages": {
+              "yum": {
+                "docker": []
+              }
+            },
+            "commands": {
+              "mkdir_che_conf": {
+                "command": "mkdir -p /home/ec2-user/che-conf; chown ec2-user:ec2-user /home/ec2-user/che-conf",
+                "test": "test ! -e /home/ec2-user/che-conf"
+              }
+            },
+            "services": {
+              "sysvinit": {
+                "docker": {
+                  "enabled": "true",
+                  "ensureRunning": "true"
+                }
+              }
             }
           },
-			    "commands": {
-			      "00_add_user_che": {
-			        "command": "adduser --shell /sbin/nologin --uid 1000 che; result=$?; if [ \"$result\" -eq \"4\" -o \"$result\" -eq \"9\" ]; then result=0; fi; exit $result;"
-			      },
-			      "01_docker_perm": {
-			      	"command": "sudo chmod 666 /var/run/docker.sock"
-			      }
-			    }
-			  },
-        "run_che": {
-          "commands": {
-            "00_run_che": {
-              "command": "sudo docker run --rm -t -v /var/run/docker.sock:/var/run/docker.sock -e CHE_CONF_FOLDER=/home/ec2-user/che-conf/ -e CHE_HOST_IP=10.1.0.1 eclipse/che start; true",
-              "test": "test \"$(sudo docker ps -a -f name=che-server | wc -l)\" -eq \"1\""
+          "che": {
+            "files": {
+              "/home/ec2-user/che-conf/che.properties": {
+                "source": "https://raw.githubusercontent.com/peterscloud/alpha/peterscloud/peterscloud/src/main/conf/che.properties",
+                "group": "ec2-user",
+                "owner": "ec2-user",
+                "mode": "000644"
+              },
+              "/etc/rc.d/init.d/che": {
+                "content": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "#!/bin/sh\n",
+                      "#\n",
+                      "#       /etc/rc.d/init.d/che\n",
+                      "#\n",
+                      "#       Daemon for Eclipse Che\n",
+                      "#\n",
+                      "# chkconfig:   2345 96 04\n",
+                      "# description: Daemon for Eclipse Che\n",
+                      "\n",
+                      "### BEGIN INIT INFO\n",
+                      "# Provides:       che\n",
+                      "# Required-Start: docker\n",
+                      "# Required-Stop:\n",
+                      "# Should-Start:\n",
+                      "# Should-Stop:\n",
+                      "# Default-Start: 2 3 4 5\n",
+                      "# Default-Stop:  0 1 6\n",
+                      "# Short-Description: start and stop Eclipse Che\n",
+                      "# Description: Daemon for Eclipse Che\n",
+                      "### END INIT INFO\n",
+                      "\n",
+                      "cmd=\"docker run --rm -t -v /var/run/docker.sock:/var/run/docker.sock -e CHE_CONF_FOLDER=/home/ec2-user/che-conf/ -e CHE_HOST_IP=",{"Ref": "ServerVpnEndpoint"}," eclipse/che\"\n",
+                      "\n", 
+                      "case \"$1\" in\n",
+                      "        start)\n",
+                      "                $cmd start;\n",
+                      "                ;;\n",
+                      "        stop)\n",
+                      "                $cmd stop\n",
+                      "                ;;\n",
+                      "        restart)\n",
+                      "                $cmd restart\n",
+                      "                ;;\n",
+                      "        *)\n",
+                      "                echo \"Usage: $0 {start|stop|restart}\"\n",
+                      "                exit 1\n",
+                      "esac\n",
+
+                    ]
+                  ]
+                },
+                "group": "root",
+                "owner": "root",
+                "mode": "000755"
+              }
+            },
+            "commands": {
+              "00_add_user_che": {
+                "command": "adduser --shell /sbin/nologin --uid 1000 che; result=$?; if [ \"$result\" -eq \"4\" -o \"$result\" -eq \"9\" ]; then result=0; fi; exit $result;"
+              },
+              "01_docker_perm": {
+                "command": "sudo chmod 666 /var/run/docker.sock"
+              },
+              "02_che_ckconfig": {
+                "command": "chkconfig --add che"
+              }
+            },
+            "services": {
+              "sysvinit": {
+                "che": {
+                  "enabled": "true",
+                  "ensureRunning": "true"
+                }
+              }
             }
           }
-        }
-          }
-        }
-      }
-    },
-
-    "Outputs" : {
-      "CheInstance" : {
-        "Description" : "IP of the Che instance",
-        "Value" :  { "Fn::GetAtt" : [ "CheInstance", "PublicIp" ]}
-      }
-    },
-    
-    "Mappings": {
-      "AWSInstanceType2Arch": {
-        "t1.micro": {
-          "Arch": "PV64"
-        },
-        "t2.nano": {
-          "Arch": "HVM64"
-        },
-        "t2.micro": {
-          "Arch": "HVM64"
-        },
-        "t2.small": {
-          "Arch": "HVM64"
-        },
-        "t2.medium": {
-          "Arch": "HVM64"
-        },
-        "t2.large": {
-          "Arch": "HVM64"
-        },
-        "m1.small": {
-          "Arch": "PV64"
-        },
-        "m1.medium": {
-          "Arch": "PV64"
-        },
-        "m1.large": {
-          "Arch": "PV64"
-        },
-        "m1.xlarge": {
-          "Arch": "PV64"
-        },
-        "m2.xlarge": {
-          "Arch": "PV64"
-        },
-        "m2.2xlarge": {
-          "Arch": "PV64"
-        },
-        "m2.4xlarge": {
-          "Arch": "PV64"
-        },
-        "m3.medium": {
-          "Arch": "HVM64"
-        },
-        "m3.large": {
-          "Arch": "HVM64"
-        },
-        "m3.xlarge": {
-          "Arch": "HVM64"
-        },
-        "m3.2xlarge": {
-          "Arch": "HVM64"
-        },
-        "m4.large": {
-          "Arch": "HVM64"
-        },
-        "m4.xlarge": {
-          "Arch": "HVM64"
-        },
-        "m4.2xlarge": {
-          "Arch": "HVM64"
-        },
-        "m4.4xlarge": {
-          "Arch": "HVM64"
-        },
-        "m4.10xlarge": {
-          "Arch": "HVM64"
-        },
-        "c1.medium": {
-          "Arch": "PV64"
-        },
-        "c1.xlarge": {
-          "Arch": "PV64"
-        },
-        "c3.large": {
-          "Arch": "HVM64"
-        },
-        "c3.xlarge": {
-          "Arch": "HVM64"
-        },
-        "c3.2xlarge": {
-          "Arch": "HVM64"
-        },
-        "c3.4xlarge": {
-          "Arch": "HVM64"
-        },
-        "c3.8xlarge": {
-          "Arch": "HVM64"
-        },
-        "c4.large": {
-          "Arch": "HVM64"
-        },
-        "c4.xlarge": {
-          "Arch": "HVM64"
-        },
-        "c4.2xlarge": {
-          "Arch": "HVM64"
-        },
-        "c4.4xlarge": {
-          "Arch": "HVM64"
-        },
-        "c4.8xlarge": {
-          "Arch": "HVM64"
-        },
-        "g2.2xlarge": {
-          "Arch": "HVMG2"
-        },
-        "g2.8xlarge": {
-          "Arch": "HVMG2"
-        },
-        "r3.large": {
-          "Arch": "HVM64"
-        },
-        "r3.xlarge": {
-          "Arch": "HVM64"
-        },
-        "r3.2xlarge": {
-          "Arch": "HVM64"
-        },
-        "r3.4xlarge": {
-          "Arch": "HVM64"
-        },
-        "r3.8xlarge": {
-          "Arch": "HVM64"
-        },
-        "i2.xlarge": {
-          "Arch": "HVM64"
-        },
-        "i2.2xlarge": {
-          "Arch": "HVM64"
-        },
-        "i2.4xlarge": {
-          "Arch": "HVM64"
-        },
-        "i2.8xlarge": {
-          "Arch": "HVM64"
-        },
-        "d2.xlarge": {
-          "Arch": "HVM64"
-        },
-        "d2.2xlarge": {
-          "Arch": "HVM64"
-        },
-        "d2.4xlarge": {
-          "Arch": "HVM64"
-        },
-        "d2.8xlarge": {
-          "Arch": "HVM64"
-        },
-        "hi1.4xlarge": {
-          "Arch": "HVM64"
-        },
-        "hs1.8xlarge": {
-          "Arch": "HVM64"
-        },
-        "cr1.8xlarge": {
-          "Arch": "HVM64"
-        },
-        "cc2.8xlarge": {
-          "Arch": "HVM64"
-        }
-      },
-      "AWSInstanceType2NATArch": {
-        "t1.micro": {
-          "Arch": "NATPV64"
-        },
-        "t2.nano": {
-          "Arch": "NATHVM64"
-        },
-        "t2.micro": {
-          "Arch": "NATHVM64"
-        },
-        "t2.small": {
-          "Arch": "NATHVM64"
-        },
-        "t2.medium": {
-          "Arch": "NATHVM64"
-        },
-        "t2.large": {
-          "Arch": "NATHVM64"
-        },
-        "m1.small": {
-          "Arch": "NATPV64"
-        },
-        "m1.medium": {
-          "Arch": "NATPV64"
-        },
-        "m1.large": {
-          "Arch": "NATPV64"
-        },
-        "m1.xlarge": {
-          "Arch": "NATPV64"
-        },
-        "m2.xlarge": {
-          "Arch": "NATPV64"
-        },
-        "m2.2xlarge": {
-          "Arch": "NATPV64"
-        },
-        "m2.4xlarge": {
-          "Arch": "NATPV64"
-        },
-        "m3.medium": {
-          "Arch": "NATHVM64"
-        },
-        "m3.large": {
-          "Arch": "NATHVM64"
-        },
-        "m3.xlarge": {
-          "Arch": "NATHVM64"
-        },
-        "m3.2xlarge": {
-          "Arch": "NATHVM64"
-        },
-        "m4.large": {
-          "Arch": "NATHVM64"
-        },
-        "m4.xlarge": {
-          "Arch": "NATHVM64"
-        },
-        "m4.2xlarge": {
-          "Arch": "NATHVM64"
-        },
-        "m4.4xlarge": {
-          "Arch": "NATHVM64"
-        },
-        "m4.10xlarge": {
-          "Arch": "NATHVM64"
-        },
-        "c1.medium": {
-          "Arch": "NATPV64"
-        },
-        "c1.xlarge": {
-          "Arch": "NATPV64"
-        },
-        "c3.large": {
-          "Arch": "NATHVM64"
-        },
-        "c3.xlarge": {
-          "Arch": "NATHVM64"
-        },
-        "c3.2xlarge": {
-          "Arch": "NATHVM64"
-        },
-        "c3.4xlarge": {
-          "Arch": "NATHVM64"
-        },
-        "c3.8xlarge": {
-          "Arch": "NATHVM64"
-        },
-        "c4.large": {
-          "Arch": "NATHVM64"
-        },
-        "c4.xlarge": {
-          "Arch": "NATHVM64"
-        },
-        "c4.2xlarge": {
-          "Arch": "NATHVM64"
-        },
-        "c4.4xlarge": {
-          "Arch": "NATHVM64"
-        },
-        "c4.8xlarge": {
-          "Arch": "NATHVM64"
-        },
-        "g2.2xlarge": {
-          "Arch": "NATHVMG2"
-        },
-        "g2.8xlarge": {
-          "Arch": "NATHVMG2"
-        },
-        "r3.large": {
-          "Arch": "NATHVM64"
-        },
-        "r3.xlarge": {
-          "Arch": "NATHVM64"
-        },
-        "r3.2xlarge": {
-          "Arch": "NATHVM64"
-        },
-        "r3.4xlarge": {
-          "Arch": "NATHVM64"
-        },
-        "r3.8xlarge": {
-          "Arch": "NATHVM64"
-        },
-        "i2.xlarge": {
-          "Arch": "NATHVM64"
-        },
-        "i2.2xlarge": {
-          "Arch": "NATHVM64"
-        },
-        "i2.4xlarge": {
-          "Arch": "NATHVM64"
-        },
-        "i2.8xlarge": {
-          "Arch": "NATHVM64"
-        },
-        "d2.xlarge": {
-          "Arch": "NATHVM64"
-        },
-        "d2.2xlarge": {
-          "Arch": "NATHVM64"
-        },
-        "d2.4xlarge": {
-          "Arch": "NATHVM64"
-        },
-        "d2.8xlarge": {
-          "Arch": "NATHVM64"
-        },
-        "hi1.4xlarge": {
-          "Arch": "NATHVM64"
-        },
-        "hs1.8xlarge": {
-          "Arch": "NATHVM64"
-        },
-        "cr1.8xlarge": {
-          "Arch": "NATHVM64"
-        },
-        "cc2.8xlarge": {
-          "Arch": "NATHVM64"
-        }
-      },
-      "AWSRegionArch2AMI": {
-        "us-east-1": {
-          "PV64": "ami-8ff710e2",
-          "HVM64": "ami-8f7687e2",
-          "HVMG2": "ami-4afd1d27"
-        },
-        "us-west-2": {
-          "PV64": "ami-eff1028f",
-          "HVM64": "ami-d0f506b0",
-          "HVMG2": "ami-ee897b8e"
-        },
-        "us-west-1": {
-          "PV64": "ami-ac85fbcc",
-          "HVM64": "ami-6e84fa0e",
-          "HVMG2": "ami-69106909"
-        },
-        "eu-west-1": {
-          "PV64": "ami-23ab2250",
-          "HVM64": "ami-b0ac25c3",
-          "HVMG2": "ami-936de5e0"
-        },
-        "eu-central-1": {
-          "PV64": "ami-27c12348",
-          "HVM64": "ami-d3c022bc",
-          "HVMG2": "ami-8e7092e1"
-        },
-        "ap-northeast-1": {
-          "PV64": "ami-26160d48",
-          "HVM64": "ami-29160d47",
-          "HVMG2": "ami-91809aff"
-        },
-        "ap-northeast-2": {
-          "PV64": "NOT_SUPPORTED",
-          "HVM64": "ami-cf32faa1",
-          "HVMG2": "NOT_SUPPORTED"
-        },
-        "ap-southeast-1": {
-          "PV64": "ami-f3dd0a90",
-          "HVM64": "ami-1ddc0b7e",
-          "HVMG2": "ami-3c30e75f"
-        },
-        "ap-southeast-2": {
-          "PV64": "ami-8f94b9ec",
-          "HVM64": "ami-0c95b86f",
-          "HVMG2": "ami-543d1137"
-        },
-        "sa-east-1": {
-          "PV64": "ami-e188018d",
-          "HVM64": "ami-fb890097",
-          "HVMG2": "NOT_SUPPORTED"
-        },
-        "cn-north-1": {
-          "PV64": "ami-77a46e1a",
-          "HVM64": "ami-05a66c68",
-          "HVMG2": "NOT_SUPPORTED"
         }
       }
     }
+  },
+  "Mappings": {
+    "AWSInstanceType2Arch": {
+      "t1.micro": {
+        "Arch": "PV64"
+      },
+      "t2.nano": {
+        "Arch": "HVM64"
+      },
+      "t2.micro": {
+        "Arch": "HVM64"
+      },
+      "t2.small": {
+        "Arch": "HVM64"
+      },
+      "t2.medium": {
+        "Arch": "HVM64"
+      },
+      "t2.large": {
+        "Arch": "HVM64"
+      },
+      "m1.small": {
+        "Arch": "PV64"
+      },
+      "m1.medium": {
+        "Arch": "PV64"
+      },
+      "m1.large": {
+        "Arch": "PV64"
+      },
+      "m1.xlarge": {
+        "Arch": "PV64"
+      },
+      "m2.xlarge": {
+        "Arch": "PV64"
+      },
+      "m2.2xlarge": {
+        "Arch": "PV64"
+      },
+      "m2.4xlarge": {
+        "Arch": "PV64"
+      },
+      "m3.medium": {
+        "Arch": "HVM64"
+      },
+      "m3.large": {
+        "Arch": "HVM64"
+      },
+      "m3.xlarge": {
+        "Arch": "HVM64"
+      },
+      "m3.2xlarge": {
+        "Arch": "HVM64"
+      },
+      "m4.large": {
+        "Arch": "HVM64"
+      },
+      "m4.xlarge": {
+        "Arch": "HVM64"
+      },
+      "m4.2xlarge": {
+        "Arch": "HVM64"
+      },
+      "m4.4xlarge": {
+        "Arch": "HVM64"
+      },
+      "m4.10xlarge": {
+        "Arch": "HVM64"
+      },
+      "c1.medium": {
+        "Arch": "PV64"
+      },
+      "c1.xlarge": {
+        "Arch": "PV64"
+      },
+      "c3.large": {
+        "Arch": "HVM64"
+      },
+      "c3.xlarge": {
+        "Arch": "HVM64"
+      },
+      "c3.2xlarge": {
+        "Arch": "HVM64"
+      },
+      "c3.4xlarge": {
+        "Arch": "HVM64"
+      },
+      "c3.8xlarge": {
+        "Arch": "HVM64"
+      },
+      "c4.large": {
+        "Arch": "HVM64"
+      },
+      "c4.xlarge": {
+        "Arch": "HVM64"
+      },
+      "c4.2xlarge": {
+        "Arch": "HVM64"
+      },
+      "c4.4xlarge": {
+        "Arch": "HVM64"
+      },
+      "c4.8xlarge": {
+        "Arch": "HVM64"
+      },
+      "g2.2xlarge": {
+        "Arch": "HVMG2"
+      },
+      "g2.8xlarge": {
+        "Arch": "HVMG2"
+      },
+      "r3.large": {
+        "Arch": "HVM64"
+      },
+      "r3.xlarge": {
+        "Arch": "HVM64"
+      },
+      "r3.2xlarge": {
+        "Arch": "HVM64"
+      },
+      "r3.4xlarge": {
+        "Arch": "HVM64"
+      },
+      "r3.8xlarge": {
+        "Arch": "HVM64"
+      },
+      "i2.xlarge": {
+        "Arch": "HVM64"
+      },
+      "i2.2xlarge": {
+        "Arch": "HVM64"
+      },
+      "i2.4xlarge": {
+        "Arch": "HVM64"
+      },
+      "i2.8xlarge": {
+        "Arch": "HVM64"
+      },
+      "d2.xlarge": {
+        "Arch": "HVM64"
+      },
+      "d2.2xlarge": {
+        "Arch": "HVM64"
+      },
+      "d2.4xlarge": {
+        "Arch": "HVM64"
+      },
+      "d2.8xlarge": {
+        "Arch": "HVM64"
+      },
+      "hi1.4xlarge": {
+        "Arch": "HVM64"
+      },
+      "hs1.8xlarge": {
+        "Arch": "HVM64"
+      },
+      "cr1.8xlarge": {
+        "Arch": "HVM64"
+      },
+      "cc2.8xlarge": {
+        "Arch": "HVM64"
+      }
+    },
+    "AWSInstanceType2NATArch": {
+      "t1.micro": {
+        "Arch": "NATPV64"
+      },
+      "t2.nano": {
+        "Arch": "NATHVM64"
+      },
+      "t2.micro": {
+        "Arch": "NATHVM64"
+      },
+      "t2.small": {
+        "Arch": "NATHVM64"
+      },
+      "t2.medium": {
+        "Arch": "NATHVM64"
+      },
+      "t2.large": {
+        "Arch": "NATHVM64"
+      },
+      "m1.small": {
+        "Arch": "NATPV64"
+      },
+      "m1.medium": {
+        "Arch": "NATPV64"
+      },
+      "m1.large": {
+        "Arch": "NATPV64"
+      },
+      "m1.xlarge": {
+        "Arch": "NATPV64"
+      },
+      "m2.xlarge": {
+        "Arch": "NATPV64"
+      },
+      "m2.2xlarge": {
+        "Arch": "NATPV64"
+      },
+      "m2.4xlarge": {
+        "Arch": "NATPV64"
+      },
+      "m3.medium": {
+        "Arch": "NATHVM64"
+      },
+      "m3.large": {
+        "Arch": "NATHVM64"
+      },
+      "m3.xlarge": {
+        "Arch": "NATHVM64"
+      },
+      "m3.2xlarge": {
+        "Arch": "NATHVM64"
+      },
+      "m4.large": {
+        "Arch": "NATHVM64"
+      },
+      "m4.xlarge": {
+        "Arch": "NATHVM64"
+      },
+      "m4.2xlarge": {
+        "Arch": "NATHVM64"
+      },
+      "m4.4xlarge": {
+        "Arch": "NATHVM64"
+      },
+      "m4.10xlarge": {
+        "Arch": "NATHVM64"
+      },
+      "c1.medium": {
+        "Arch": "NATPV64"
+      },
+      "c1.xlarge": {
+        "Arch": "NATPV64"
+      },
+      "c3.large": {
+        "Arch": "NATHVM64"
+      },
+      "c3.xlarge": {
+        "Arch": "NATHVM64"
+      },
+      "c3.2xlarge": {
+        "Arch": "NATHVM64"
+      },
+      "c3.4xlarge": {
+        "Arch": "NATHVM64"
+      },
+      "c3.8xlarge": {
+        "Arch": "NATHVM64"
+      },
+      "c4.large": {
+        "Arch": "NATHVM64"
+      },
+      "c4.xlarge": {
+        "Arch": "NATHVM64"
+      },
+      "c4.2xlarge": {
+        "Arch": "NATHVM64"
+      },
+      "c4.4xlarge": {
+        "Arch": "NATHVM64"
+      },
+      "c4.8xlarge": {
+        "Arch": "NATHVM64"
+      },
+      "g2.2xlarge": {
+        "Arch": "NATHVMG2"
+      },
+      "g2.8xlarge": {
+        "Arch": "NATHVMG2"
+      },
+      "r3.large": {
+        "Arch": "NATHVM64"
+      },
+      "r3.xlarge": {
+        "Arch": "NATHVM64"
+      },
+      "r3.2xlarge": {
+        "Arch": "NATHVM64"
+      },
+      "r3.4xlarge": {
+        "Arch": "NATHVM64"
+      },
+      "r3.8xlarge": {
+        "Arch": "NATHVM64"
+      },
+      "i2.xlarge": {
+        "Arch": "NATHVM64"
+      },
+      "i2.2xlarge": {
+        "Arch": "NATHVM64"
+      },
+      "i2.4xlarge": {
+        "Arch": "NATHVM64"
+      },
+      "i2.8xlarge": {
+        "Arch": "NATHVM64"
+      },
+      "d2.xlarge": {
+        "Arch": "NATHVM64"
+      },
+      "d2.2xlarge": {
+        "Arch": "NATHVM64"
+      },
+      "d2.4xlarge": {
+        "Arch": "NATHVM64"
+      },
+      "d2.8xlarge": {
+        "Arch": "NATHVM64"
+      },
+      "hi1.4xlarge": {
+        "Arch": "NATHVM64"
+      },
+      "hs1.8xlarge": {
+        "Arch": "NATHVM64"
+      },
+      "cr1.8xlarge": {
+        "Arch": "NATHVM64"
+      },
+      "cc2.8xlarge": {
+        "Arch": "NATHVM64"
+      }
+    },
+    "AWSRegionArch2AMI": {
+      "us-east-1": {
+        "PV64": "ami-8ff710e2",
+        "HVM64": "ami-8f7687e2",
+        "HVMG2": "ami-4afd1d27"
+      },
+      "us-west-2": {
+        "PV64": "ami-eff1028f",
+        "HVM64": "ami-d0f506b0",
+        "HVMG2": "ami-ee897b8e"
+      },
+      "us-west-1": {
+        "PV64": "ami-ac85fbcc",
+        "HVM64": "ami-6e84fa0e",
+        "HVMG2": "ami-69106909"
+      },
+      "eu-west-1": {
+        "PV64": "ami-23ab2250",
+        "HVM64": "ami-b0ac25c3",
+        "HVMG2": "ami-936de5e0"
+      },
+      "eu-central-1": {
+        "PV64": "ami-27c12348",
+        "HVM64": "ami-d3c022bc",
+        "HVMG2": "ami-8e7092e1"
+      },
+      "ap-northeast-1": {
+        "PV64": "ami-26160d48",
+        "HVM64": "ami-29160d47",
+        "HVMG2": "ami-91809aff"
+      },
+      "ap-northeast-2": {
+        "PV64": "NOT_SUPPORTED",
+        "HVM64": "ami-cf32faa1",
+        "HVMG2": "NOT_SUPPORTED"
+      },
+      "ap-southeast-1": {
+        "PV64": "ami-f3dd0a90",
+        "HVM64": "ami-1ddc0b7e",
+        "HVMG2": "ami-3c30e75f"
+      },
+      "ap-southeast-2": {
+        "PV64": "ami-8f94b9ec",
+        "HVM64": "ami-0c95b86f",
+        "HVMG2": "ami-543d1137"
+      },
+      "sa-east-1": {
+        "PV64": "ami-e188018d",
+        "HVM64": "ami-fb890097",
+        "HVMG2": "NOT_SUPPORTED"
+      },
+      "cn-north-1": {
+        "PV64": "ami-77a46e1a",
+        "HVM64": "ami-05a66c68",
+        "HVMG2": "NOT_SUPPORTED"
+      }
+    }
+  }
 }
