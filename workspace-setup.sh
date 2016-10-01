@@ -3,10 +3,10 @@
 sudo apt-get update
 
 #install gcc
-sudo apt-get install g++ gcc make gdb gdbserver -y
+sudo apt-get install -y g++ gcc make gdb gdbserver
 
 #zlib is required by ruby bundle install
-sudo apt-get install zlib1g-dev
+sudo apt-get install -y zlib1g-dev
 
 
 #nodejs required by Jekyll

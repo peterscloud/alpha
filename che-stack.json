@@ -149,6 +149,7 @@
     "CheInstance": {
       "Type": "AWS::EC2::Instance",
       "Properties": {
+        "InstanceType": {"Ref":"InstanceType"},
         "ImageId": {
           "Fn::FindInMap": [
             "AWSRegionArch2AMI",
@@ -394,16 +395,20 @@
                       "# Description: Daemon for Eclipse Che\n",
                       "### END INIT INFO\n",
                       "\n",
+                      "lockfile=/var/lock/subsys/che\n",
                       "cmd=\"docker run --rm -t -v /var/run/docker.sock:/var/run/docker.sock -e CHE_CONF_FOLDER=/home/ec2-user/che-conf/ -e CHE_HOST_IP=",{"Ref": "ServerVpnEndpoint"}," eclipse/che\"\n",
                       "\n", 
                       "case \"$1\" in\n",
                       "        start)\n",
+                      "                touch $lockfile\n",
                       "                $cmd start;\n",
                       "                ;;\n",
                       "        stop)\n",
+                      "                rm -f $lockfile\n",
                       "                $cmd stop\n",
                       "                ;;\n",
                       "        restart)\n",
+                      "                touch $lockfile\n",
                       "                $cmd restart\n",
                       "                ;;\n",
                       "        *)\n",
@@ -441,6 +446,18 @@
           }
         }
       }
+    },
+    "PublicIP" : {
+      "Type" : "AWS::EC2::EIP",
+      "Properties" : {
+        "InstanceId" : { "Ref" : "CheInstance" }
+      }
+    }
+  },
+  "Outputs" : {
+    "PublicIP" : {
+      "Description" : "The public IP of the Che host.",
+      "Value" : {"Ref": "PublicIP"}
     }
   },
   "Mappings": {
